@@ -157,8 +157,8 @@
   <div class="card" id="step2" style="opacity:0.4;pointer-events:none;">
     <div class="card-title">Krok 2 — Wyszukaj produkt po EAN</div>
     <div>
-      <label for="storage-id-test">Storage ID (skopiuj z kroku 1)</label>
-      <input type="text" id="storage-id-test" placeholder="np. bl_123456" />
+      <label for="storage-id-test">Inventory ID (skopiuj z kroku 1 — sekcja "Katalogi")</label>
+      <input type="text" id="storage-id-test" placeholder="np. 12345" />
     </div>
     <div>
       <label for="ean-test">EAN produktu do testu</label>
@@ -214,35 +214,53 @@
     $('storages-list').innerHTML = '';
 
     try {
-      const data = await blCall(key, 'getStoragesList');
+      const [storData, invData] = await Promise.all([
+        blCall(key, 'getStoragesList'),
+        blCall(key, 'getInventories')
+      ]);
 
-      if (data.status !== 'SUCCESS') {
-        showResult('storages-result', 'err', `Błąd API: ${data.error_message || data.status}. Sprawdź czy klucz API jest poprawny.`);
-        setBtn('test-icon', 'test-label', 'ti-plug', 'Pobierz listę magazynów', false);
+      if (storData.status !== 'SUCCESS' && invData.status !== 'SUCCESS') {
+        showResult('storages-result', 'err', `Błąd API: ${storData.error_message || storData.status}. Sprawdź czy klucz API jest poprawny.`);
+        setBtn('test-icon', 'test-label', 'ti-plug', 'Pobierz ponownie', false);
         return;
       }
 
-      const storages = data.storages || [];
-      if (!storages.length) {
-        showResult('storages-result', 'err', 'Brak magazynów w tym koncie BaseLinker.');
-        setBtn('test-icon', 'test-label', 'ti-plug', 'Pobierz listę magazynów', false);
-        return;
-      }
+      const storages = storData.storages || [];
+      const inventories = invData.inventories || [];
+      const total = storages.length + inventories.length;
 
-      showResult('storages-result', 'ok', `✓ Połączono. Znaleziono ${storages.length} magazyn${storages.length > 1 ? 'y/ów' : ''}.`);
+      showResult('storages-result', 'ok', `✓ Połączono. Znaleziono ${storages.length} magazyn${storages.length !== 1 ? 'y/ów' : ''} i ${inventories.length} katalog${inventories.length !== 1 ? 'i/ów' : ''} produktów.`);
 
       const list = $('storages-list');
       list.style.display = 'flex';
-      list.innerHTML = storages.map(s => `
-        <div class="storage-item">
-          <div>
-            <div class="storage-name">${s.name || 'Magazyn'}</div>
-            <div class="storage-id">${s.storage_id}</div>
-          </div>
-          <button class="copy-badge" onclick="copyId('${s.storage_id}')" title="Kliknij żeby skopiować">${s.storage_id} <i class="ti ti-copy" style="font-size:11px;"></i></button>
-        </div>
-      `).join('');
 
+      let html = '';
+      if (inventories.length) {
+        html += `<div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;padding:4px 2px;">Katalogi produktów (Inventory ID) — użyj tych w appce</div>`;
+        html += inventories.map(inv => `
+          <div class="storage-item" style="border-left: 3px solid var(--blue);">
+            <div>
+              <div class="storage-name">${inv.name || 'Katalog'}</div>
+              <div class="storage-id">inventory_id: ${inv.inventory_id}</div>
+            </div>
+            <button class="copy-badge" onclick="copyInvId('${inv.inventory_id}')" title="Kliknij żeby skopiować">${inv.inventory_id} <i class="ti ti-copy" style="font-size:11px;"></i></button>
+          </div>
+        `).join('');
+      }
+      if (storages.length) {
+        html += `<div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;padding:4px 2px;margin-top:8px;">Magazyny (Storage ID) — do stanów magazynowych</div>`;
+        html += storages.map(s => `
+          <div class="storage-item">
+            <div>
+              <div class="storage-name">${s.name || 'Magazyn'}</div>
+              <div class="storage-id">storage_id: ${s.storage_id}</div>
+            </div>
+            <div class="copy-badge" style="cursor:default;">${s.storage_id}</div>
+          </div>
+        `).join('');
+      }
+
+      list.innerHTML = html;
       $('step2').style.opacity = '1';
       $('step2').style.pointerEvents = 'auto';
       setBtn('test-icon', 'test-label', 'ti-check', 'Połączono', false);
@@ -255,10 +273,10 @@
 
   async function testProduct() {
     const key = $('api-key').value.trim();
-    const storageId = $('storage-id-test').value.trim();
+    const invId = $('storage-id-test').value.trim();
     const ean = $('ean-test').value.trim();
 
-    if (!storageId) { showResult('product-result', 'err', 'Wpisz Storage ID.'); return; }
+    if (!invId) { showResult('product-result', 'err', 'Wpisz Inventory ID (skopiuj z kroku 1).'); return; }
     if (!ean) { showResult('product-result', 'err', 'Wpisz EAN produktu.'); return; }
 
     setBtn('search-icon', 'search-label', 'ti-loader-2', 'Szukam...', true);
@@ -267,7 +285,7 @@
 
     try {
       const data = await blCall(key, 'getInventoryProductsList', {
-        storage_id: storageId,
+        inventory_id: invId,
         filter_ean: ean
       });
 
@@ -301,7 +319,7 @@
       `;
       $('product-detail').style.display = 'block';
       setBtn('search-icon', 'search-label', 'ti-check', 'Znaleziono', false);
-      diagnose('ok', p.name);
+      diagnose('ok', p.name, invId);
 
     } catch(e) {
       showResult('product-result', 'err', 'Błąd połączenia.');
@@ -309,23 +327,23 @@
     }
   }
 
-  function diagnose(type, extra) {
+  function diagnose(type, extra, invId) {
     $('step3').style.opacity = '1';
     $('step3').style.pointerEvents = 'auto';
     const el = $('final-result');
     if (type === 'ok') {
       el.className = 'result-block ok';
-      el.innerHTML = `<strong>✓ Wszystko działa poprawnie.</strong><br>Appka powinna bez problemu znajdować produkty po EAN. Skopiuj Storage ID z kroku 1 i wklej w ustawienia appki.`;
+      el.innerHTML = `<strong>✓ Wszystko działa.</strong><br><br>W ustawieniach appki wpisz:<br>— Inventory ID: <strong>${invId}</strong><br><br>Appka znajdzie produkty po EAN.`;
     } else if (type === 'not_found') {
       el.className = 'result-block err';
       el.innerHTML = `<strong>Produkt nie znaleziony.</strong><br><br>Możliwe przyczyny:<br>
       1. Pole EAN nie jest uzupełnione w tym produkcie w BaseLinker<br>
-      2. Wpisany EAN jest inny niż zapisany w produkcie<br>
-      3. Zły Storage ID<br><br>
-      <strong>Sprawdź:</strong> wejdź w BaseLinker → konkretny produkt → czy pole EAN jest wypełnione i zgadza się z kodem na produkcie.`;
+      2. Wpisany EAN różni się od zapisanego w produkcie<br>
+      3. Produkt jest w innym katalogu — spróbuj z innym Inventory ID<br><br>
+      Sprawdź: BaseLinker → konkretny produkt → zakładka "Podstawowe" → pole EAN.`;
     } else if (type === 'api_error') {
       el.className = 'result-block err';
-      el.innerHTML = `<strong>Błąd API:</strong> ${extra || ''}<br><br>Sprawdź czy Storage ID jest poprawny — powinien wyglądać dokładnie tak jak w kroku 1 (np. <code>bl_123456</code>).`;
+      el.innerHTML = `<strong>Błąd API:</strong> ${extra || ''}<br><br>Upewnij się że skopiowałeś Inventory ID z sekcji "Katalogi produktów" w kroku 1 (sama liczba, np. <code>12345</code>).`;
     }
   }
 
@@ -333,6 +351,12 @@
     const el = $(id);
     el.className = 'result-block ' + type;
     el.textContent = msg;
+  }
+
+  function copyInvId(id) {
+    navigator.clipboard.writeText(id).then(() => {
+      $('storage-id-test').value = id;
+    });
   }
 
   function copyId(id) {
